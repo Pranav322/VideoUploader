@@ -1,0 +1,143 @@
+{% comment %} <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Video</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Upload a Video</h1>
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit" class="btn btn-primary">Upload</button>
+        </form>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html> {% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Video</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Upload a Video</h1>
+        <form id="videoForm" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="id_title">Title:</label>
+                <input type="text" name="title" maxlength="100" required id="id_title" class="form-control mt-3">
+            </div>
+            <div class="form-group">
+                <label for="fileInput">Video:</label>
+                <input type="file" id="fileInput" name="video" class="form-control mt-3" required>
+            </div>
+            <button type="submit" id="uploadButton" class="btn btn-primary mt-3">Upload to S3</button>
+        </form>
+        <div id="uploadStatus" class="mt-3"></div>
+        <div class="progress mt-3">
+            <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const videoForm = document.getElementById('videoForm');
+            const statusDiv = document.getElementById('uploadStatus');
+            const progressBar = document.getElementById('progressBar');
+
+            videoForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const formData = new FormData(videoForm);
+                const file = document.getElementById('fileInput').files[0];
+
+                if (!file) {
+                    statusDiv.textContent = 'Please select a file to upload.';
+                    return;
+                }
+
+                try {
+                    statusDiv.textContent = 'Requesting upload URL...';
+
+                    const response = await fetch("{% url 'upload_video' %}", {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': formData.get('csrfmiddlewaretoken'),
+                        },
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to get upload URL.');
+                    }
+
+                    const data = await response.json();
+                    const presignedUrl = data.url;
+
+                    statusDiv.textContent = 'Uploading file to S3...';
+
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('PUT', presignedUrl, true);
+                    xhr.setRequestHeader('Content-Type', file.type);
+
+                    xhr.upload.onprogress = (event) => {
+                        if (event.lengthComputable) {
+                            const percentComplete = (event.loaded / event.total) * 100;
+                            progressBar.style.width = percentComplete + '%';
+                            progressBar.textContent = Math.round(percentComplete) + '%';
+                            progressBar.setAttribute('aria-valuenow', percentComplete);
+                        }
+                    };
+
+                    xhr.onload = async () => {
+                        if (xhr.status === 200) {
+                            statusDiv.textContent = 'Upload successful! Notifying server...';
+
+                            const notifyResponse = await fetch('/notify_upload_complete/', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': formData.get('csrfmiddlewaretoken'),
+                                },
+                                body: JSON.stringify({
+                                    filename: file.name,
+                                    title: formData.get('title'),
+                                }),
+                            });
+
+                            if (!notifyResponse.ok) {
+                                throw new Error('Failed to notify server.');
+                            }
+
+                            statusDiv.textContent = 'Server notified of upload.';
+                        } else {
+                            throw new Error('Upload to S3 failed.');
+                        }
+                    };
+
+                    xhr.onerror = () => {
+                        statusDiv.textContent = 'Upload to S3 failed.';
+                    };
+
+                    xhr.send(file);
+                } catch (error) {
+                    statusDiv.textContent = error.message;
+                }
+            });
+        });
+    </script>
+
+    <script defer src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script defer src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
